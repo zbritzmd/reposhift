@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { CategoryScore, RepoFile, RepoTreeEntry, StackInfo } from "@/lib/types";
 
 interface GeneratePanelProps {
@@ -46,8 +46,10 @@ export function GeneratePanel({
   auditFindings,
 }: GeneratePanelProps) {
   const [activeTab, setActiveTab] = useState<GenerateTab>("standards");
-  const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  // Per-tab generating and error state (Bug 2 fix: fully independent)
+  const [generatingTabs, setGeneratingTabs] = useState<Set<GenerateTab>>(new Set());
+  const [tabErrors, setTabErrors] = useState<Map<GenerateTab, string>>(new Map());
 
   // Content state per tab
   const [standardsContent, setStandardsContent] = useState<string | null>(null);
@@ -67,6 +69,9 @@ export function GeneratePanel({
   const [mcpContent, setMcpContent] = useState<string | null>(null);
   const [remediationContent, setRemediationContent] = useState<string | null>(null);
 
+  // Copy feedback state (Enhancement 7)
+  const [copyFeedback, setCopyFeedback] = useState(false);
+
   const toggleTool = (tool: string) => {
     setSelectedTools((prev) => {
       const next = new Set(prev);
@@ -76,14 +81,23 @@ export function GeneratePanel({
     });
   };
 
-  const handleGenerate = async () => {
-    setGenerating(true);
-    setError(null);
+  const isTabGenerated = (tab: GenerateTab): boolean => {
+    switch (tab) {
+      case "standards": return standardsContent !== null;
+      case "ai-infra": return aiInfra !== null;
+      case "mcp": return mcpContent !== null;
+      case "remediation": return remediationContent !== null;
+    }
+  };
+
+  const generateTab = useCallback(async (tab: GenerateTab) => {
+    setGeneratingTabs((prev) => new Set(prev).add(tab));
+    setTabErrors((prev) => { const next = new Map(prev); next.delete(tab); return next; });
 
     try {
       const headers = { "Content-Type": "application/json" };
 
-      switch (activeTab) {
+      switch (tab) {
         case "standards": {
           const body = JSON.stringify({ stack, tree, files, auditFindings });
           const res = await fetch("/api/generate-standards", { method: "POST", headers, body });
@@ -121,14 +135,29 @@ export function GeneratePanel({
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Generation failed");
+      setTabErrors((prev) => {
+        const next = new Map(prev);
+        next.set(tab, err instanceof Error ? err.message : "Generation failed");
+        return next;
+      });
     } finally {
-      setGenerating(false);
+      setGeneratingTabs((prev) => { const next = new Set(prev); next.delete(tab); return next; });
     }
+  }, [stack, tree, files, auditFindings, selectedTools]);
+
+  const handleGenerate = () => generateTab(activeTab);
+
+  // Enhancement 5: Generate All
+  const handleGenerateAll = async () => {
+    const tabs: GenerateTab[] = ["standards", "ai-infra", "mcp", "remediation"];
+    const toGenerate = tabs.filter((t) => !isTabGenerated(t));
+    await Promise.all(toGenerate.map((tab) => generateTab(tab)));
   };
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
+    setCopyFeedback(true);
+    setTimeout(() => setCopyFeedback(false), 1500);
   };
 
   const getCurrentContent = (): string | null => {
@@ -145,23 +174,56 @@ export function GeneratePanel({
   };
 
   const currentContent = getCurrentContent();
+  const isGenerating = generatingTabs.has(activeTab);
+  const currentError = tabErrors.get(activeTab) ?? null;
+  const anyGenerating = generatingTabs.size > 0;
+  const allGenerated = TABS.every((t) => isTabGenerated(t.key));
 
   return (
     <div className="rounded-xl border border-border bg-surface-raised overflow-hidden">
-      {/* Tabs */}
+      {/* Header with Generate All button (Enhancement 5) */}
+      <div className="flex items-center justify-between px-5 pt-4 pb-2">
+        <h3 className="text-sm font-medium text-text-primary">Generate Outputs</h3>
+        {!allGenerated && (
+          <button
+            onClick={handleGenerateAll}
+            disabled={anyGenerating}
+            className="px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-dim disabled:opacity-50 text-white text-xs font-medium transition-colors flex items-center gap-1.5"
+          >
+            {anyGenerating ? (
+              <>
+                <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Generating...
+              </>
+            ) : (
+              "Generate All"
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* Tabs with checkmarks (Enhancement 6) */}
       <div className="flex border-b border-border overflow-x-auto">
         {TABS.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`flex-1 min-w-0 py-3 px-3 text-sm font-medium transition-colors whitespace-nowrap ${
+            className={`flex-1 min-w-0 py-3 px-3 text-sm font-medium transition-colors whitespace-nowrap flex items-center justify-center gap-1.5 ${
               activeTab === tab.key
                 ? "text-accent border-b-2 border-accent bg-accent-glow"
                 : "text-text-muted hover:text-text-secondary"
             }`}
           >
-            <span className="mr-1.5">{tab.icon}</span>
+            <span className="mr-0.5">{tab.icon}</span>
             {tab.label}
+            {isTabGenerated(tab.key) && (
+              <span className="w-4 h-4 rounded-full bg-success/20 text-success flex items-center justify-center text-[10px]">
+                ✓
+              </span>
+            )}
+            {generatingTabs.has(tab.key) && !isTabGenerated(tab.key) && (
+              <span className="w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+            )}
           </button>
         ))}
       </div>
@@ -230,28 +292,26 @@ export function GeneratePanel({
         )}
 
         {/* Generate button or content */}
-        {!currentContent ? (
+        {!currentContent && !isGenerating ? (
           <button
             onClick={handleGenerate}
-            disabled={generating}
+            disabled={isGenerating}
             className="w-full py-3 rounded-lg bg-accent hover:bg-accent-dim disabled:opacity-50 text-white font-medium transition-colors flex items-center justify-center gap-2"
           >
-            {generating ? (
-              <>
-                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Generating with Claude...
-              </>
-            ) : (
-              <>Generate {TABS.find((t) => t.key === activeTab)?.label}</>
-            )}
+            Generate {TABS.find((t) => t.key === activeTab)?.label}
           </button>
-        ) : (
+        ) : isGenerating && !currentContent ? (
+          <div className="w-full py-3 rounded-lg bg-accent/20 text-accent font-medium flex items-center justify-center gap-2">
+            <span className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+            Generating with Claude...
+          </div>
+        ) : currentContent ? (
           <div className="relative">
             <button
               onClick={() => copyToClipboard(currentContent)}
               className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-surface-overlay text-text-secondary hover:text-text-primary text-xs font-medium transition-colors z-10"
             >
-              Copy
+              {copyFeedback ? "Copied!" : "Copy"}
             </button>
             <pre
               className="p-4 rounded-lg bg-surface border border-border overflow-auto max-h-[500px] text-sm text-text-secondary leading-relaxed whitespace-pre-wrap"
@@ -260,12 +320,12 @@ export function GeneratePanel({
               {currentContent}
             </pre>
           </div>
-        )}
+        ) : null}
 
-        {/* Error */}
-        {error && (
+        {/* Per-tab error (Bug 2 fix) */}
+        {currentError && (
           <div className="mt-3 p-3 rounded-lg border border-critical/30 bg-critical/5">
-            <p className="text-sm text-critical">{error}</p>
+            <p className="text-sm text-critical">{currentError}</p>
           </div>
         )}
       </div>

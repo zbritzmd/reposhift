@@ -61,6 +61,27 @@ export default function Home() {
     useState<AuditCategory | null>(null);
   const [showGenerate, setShowGenerate] = useState(false);
 
+  // Enhancement 9: Reset/scan another repo
+  const handleReset = useCallback(() => {
+    setRepoUrl("");
+    setGithubToken("");
+    setScanning(false);
+    setScanPhase("cloning");
+    setScanProgress(0);
+    setScanMessage("");
+    setError(null);
+    setRepoName("");
+    setTree([]);
+    setFiles([]);
+    setStack(null);
+    setFileCount(0);
+    setReport(null);
+    setCategoryResults(new Map());
+    setAnalyzingCategories(new Set());
+    setSelectedCategory(null);
+    setShowGenerate(false);
+  }, []);
+
   // --------------------------------------------------------
   // Scan repo
   // --------------------------------------------------------
@@ -143,6 +164,12 @@ export default function Home() {
             const result: CategoryScore = await analyzeRes.json();
             results.set(cat, result);
             setCategoryResults(new Map(results));
+          } else {
+            const errData = await analyzeRes.json().catch(() => ({ error: `Analysis failed (${analyzeRes.status})` }));
+            // Surface API errors (e.g., "credit balance too low") to the user
+            if (analyzeRes.status >= 500 && errData.error) {
+              setError(errData.error);
+            }
           }
         } catch (catError) {
           console.error(`Failed to analyze ${cat}:`, catError);
@@ -226,17 +253,37 @@ export default function Home() {
           </div>
         )}
 
-        {/* Error */}
+        {/* Error Banner (Enhancement 4) */}
         {error && (
-          <div className="mt-8 rounded-xl border border-critical/30 bg-critical/5 p-4 animate-fade-up">
-            <p className="text-critical font-medium">{error}</p>
+          <div className="mt-8 rounded-xl border border-critical/30 bg-critical/5 p-4 animate-fade-up flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="text-critical text-lg mt-0.5">⚠</span>
+              <div>
+                <p className="text-critical font-medium">Scan Failed</p>
+                <p className="text-critical/80 text-sm mt-1">{error}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setError(null)}
+              className="text-critical/60 hover:text-critical transition-colors text-lg leading-none p-1"
+            >
+              ×
+            </button>
           </div>
         )}
 
-        {/* Stack Info */}
+        {/* Stack Info + Reset Button (Enhancement 9) */}
         {stack && !scanning && (
-          <div className="mt-6 animate-fade-up">
-            <StackBadges stack={stack} fileCount={fileCount} repoName={repoName} />
+          <div className="mt-6 animate-fade-up flex items-start gap-3">
+            <div className="flex-1">
+              <StackBadges stack={stack} fileCount={fileCount} repoName={repoName} />
+            </div>
+            <button
+              onClick={handleReset}
+              className="mt-0.5 px-3 py-2 rounded-lg border border-border bg-surface-raised hover:border-border-bright text-text-secondary hover:text-text-primary text-xs font-medium transition-colors whitespace-nowrap"
+            >
+              Scan Another
+            </button>
           </div>
         )}
 

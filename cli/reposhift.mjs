@@ -192,17 +192,23 @@ const CATEGORY_LABELS = {
   "runtime-stability": "Runtime & Stability",
 };
 
+function extractJSON(text) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{")) return trimmed;
+  const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch) return fenceMatch[1].trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start !== -1 && end !== -1 && end > start) return trimmed.slice(start, end + 1);
+  return trimmed;
+}
+
 async function analyzeCategory(category, stack, treeSummary, fileContext) {
   const prompt = `Analyze the ${CATEGORY_LABELS[category]} of this ${stack.framework} (${stack.language}) codebase.\n\nREPOSITORY TREE:\n${treeSummary}\n\nSOURCE FILES:\n${fileContext}`;
   const text = await callClaude(SYSTEM_PROMPT, prompt);
   try {
-    return JSON.parse(text);
+    return JSON.parse(extractJSON(text));
   } catch {
-    // Try to extract JSON from potential markdown wrapping
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch {}
-    }
     return { score: 0, summary: "Analysis failed to parse", findings: [] };
   }
 }
@@ -316,22 +322,22 @@ ${c.bold}Categories:${c.reset}
     process.exit(1);
   }
 
-  if (!ANTHROPIC_API_KEY) {
-    console.error(`${c.red}ANTHROPIC_API_KEY not set. Export it: export ANTHROPIC_API_KEY=sk-ant-...${c.reset}`);
-    process.exit(1);
-  }
-
   // Parse repo URL
   const match = flags.repo.replace(/\.git$/, "").match(/github\.com\/([^/]+)\/([^/\s#?]+)/);
   if (!match) {
     console.error(`${c.red}Invalid GitHub URL: ${flags.repo}${c.reset}`);
     process.exit(1);
   }
+
+  if (!ANTHROPIC_API_KEY) {
+    console.error(`${c.red}ANTHROPIC_API_KEY not set. Export it: export ANTHROPIC_API_KEY=sk-ant-...${c.reset}`);
+    process.exit(1);
+  }
   const [, owner, repo] = match;
   const token = flags.token || GITHUB_TOKEN;
   const asJson = flags.json === true;
   const categoriesToRun = flags.categories
-    ? flags.categories.split(",").filter((c) => ALL_CATEGORIES.includes(c))
+    ? flags.categories.split(",").filter((cat) => ALL_CATEGORIES.includes(cat))
     : ALL_CATEGORIES;
 
   if (!asJson) {

@@ -268,7 +268,7 @@ export async function analyzeCategory(
 
     const findings: Finding[] = (parsed.findings as Record<string, unknown>[] || []).map(
       (f: Record<string, unknown>, i: number) => ({
-        id: f.id || `${category}-${i + 1}`,
+        id: (f.id as string) || `${category}-${i + 1}`,
         category,
         severity: (f.severity as Severity) || "info",
         title: (f.title as string) || "Finding",
@@ -280,9 +280,9 @@ export async function analyzeCategory(
 
     return {
       category,
-      score: Math.max(0, Math.min(100, parsed.score || 50)),
+      score: Math.max(0, Math.min(100, (parsed.score as number) || 50)),
       findings,
-      summary: parsed.summary || "Analysis complete.",
+      summary: (parsed.summary as string) || "Analysis complete.",
     };
   } catch (error) {
     console.error(`Analysis error for ${category}:`, error);

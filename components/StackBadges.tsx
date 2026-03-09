@@ -17,7 +17,7 @@ export function StackBadges({ stack, fileCount, repoName }: StackBadgesProps) {
     stack.styling,
     stack.packageManager,
     ...stack.additional,
-  ].filter(Boolean);
+  ].filter((v): v is string => Boolean(v) && v !== "Unknown");
 
   return (
     <div className="rounded-xl border border-border bg-surface-raised p-4 flex flex-wrap items-center gap-3">
