@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateRemediationPlan } from "@/lib/analyzer";
+import { generateRemediationPlan, hasApiKey } from "@/lib/analyzer";
 import { CategoryScore, RepoFile, RepoTreeEntry, StackInfo } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
@@ -11,9 +11,9 @@ export async function POST(req: NextRequest) {
       auditFindings: CategoryScore[];
     };
 
-    if (!process.env.ANTHROPIC_API_KEY) {
+    if (!hasApiKey()) {
       return NextResponse.json(
-        { error: "ANTHROPIC_API_KEY not configured" },
+        { error: "ANTHROPIC_API_KEY not configured. Add it to .env.local" },
         { status: 500 }
       );
     }

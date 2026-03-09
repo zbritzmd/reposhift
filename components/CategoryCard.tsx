@@ -82,7 +82,7 @@ export function CategoryCard({
       onClick={onClick}
       disabled={!result}
       className={`
-        text-left rounded-xl border p-4 transition-all duration-200 card-glow animate-fade-up
+        group text-left rounded-xl border p-4 transition-all duration-200 card-glow animate-fade-up
         ${isSelected
           ? "border-accent bg-accent-glow"
           : "border-border bg-surface-raised hover:border-border-bright"
@@ -123,11 +123,21 @@ export function CategoryCard({
           <p className="mt-1.5 text-xs text-text-muted line-clamp-2 leading-relaxed">
             {result.summary}
           </p>
-          {findingCount > 0 && (
-            <p className="mt-2 text-xs text-text-secondary">
-              {findingCount} finding{findingCount !== 1 ? "s" : ""}
-            </p>
-          )}
+          <div className="mt-2 flex items-center justify-between">
+            {findingCount > 0 ? (
+              <p className="text-xs text-text-secondary">
+                {findingCount} finding{findingCount !== 1 ? "s" : ""}
+              </p>
+            ) : (
+              <span />
+            )}
+            <span className={`text-[10px] font-medium flex items-center gap-0.5 transition-colors ${isSelected ? "text-accent" : "text-text-muted group-hover:text-text-secondary"}`}>
+              {isSelected ? "Hide" : "View"}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points={isSelected ? "18 15 12 9 6 15" : "6 9 12 15 18 9"} />
+              </svg>
+            </span>
+          </div>
         </>
       ) : (
         <p className="mt-2 text-xs text-text-muted">{meta.description}</p>

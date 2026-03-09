@@ -3,6 +3,8 @@
 // ============================================================
 
 import Anthropic from "@anthropic-ai/sdk";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 import {
   AuditCategory,
   CategoryScore,
@@ -13,7 +15,27 @@ import {
   StackInfo,
 } from "./types";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || "" });
+// Resolve API key: process.env may be overridden by parent shell (e.g. Claude Code
+// sets ANTHROPIC_API_KEY to empty), so fall back to reading .env.local directly.
+function resolveApiKey(): string {
+  const envKey = process.env.ANTHROPIC_API_KEY;
+  if (envKey) return envKey;
+  try {
+    const envPath = resolve(process.cwd(), ".env.local");
+    const content = readFileSync(envPath, "utf-8");
+    const match = content.match(/^ANTHROPIC_API_KEY=(.+)$/m);
+    return match?.[1]?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+const ANTHROPIC_API_KEY = resolveApiKey();
+const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+
+export function hasApiKey(): boolean {
+  return ANTHROPIC_API_KEY.length > 0;
+}
 
 // ----------------------------------------------------------
 // Robust JSON extraction — handles markdown fences, preamble

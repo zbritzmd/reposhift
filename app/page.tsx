@@ -127,27 +127,13 @@ export default function Home() {
         `Detected: ${scanData.stack.framework} / ${scanData.stack.language} — ${scanData.fileCount} files`
       );
 
-      // Step 2: Analyze each category
+      // Step 2: Analyze categories in parallel batches of 3
       const results = new Map<AuditCategory, CategoryScore>();
-      const phaseMap: Record<AuditCategory, ScanPhase> = {
-        structure: "analyzing-structure",
-        patterns: "analyzing-patterns",
-        "hardcoded-values": "analyzing-hardcoded",
-        dependencies: "analyzing-dependencies",
-        "dead-code": "analyzing-structure",
-        security: "analyzing-security",
-        "runtime-stability": "analyzing-runtime",
-      };
+      const BATCH_SIZE = 3;
+      let completed = 0;
 
-      for (let i = 0; i < CATEGORIES_TO_ANALYZE.length; i++) {
-        const cat = CATEGORIES_TO_ANALYZE[i];
-        const progress = 20 + ((i + 1) / CATEGORIES_TO_ANALYZE.length) * 70;
-
-        setScanPhase(phaseMap[cat] || "scoring");
-        setScanProgress(progress);
-        setScanMessage(`Analyzing ${CATEGORY_META[cat].label}...`);
+      const analyzeOne = async (cat: AuditCategory) => {
         setAnalyzingCategories((prev) => new Set(prev).add(cat));
-
         try {
           const analyzeRes = await fetch("/api/analyze", {
             method: "POST",
@@ -166,20 +152,30 @@ export default function Home() {
             setCategoryResults(new Map(results));
           } else {
             const errData = await analyzeRes.json().catch(() => ({ error: `Analysis failed (${analyzeRes.status})` }));
-            // Surface API errors (e.g., "credit balance too low") to the user
             if (analyzeRes.status >= 500 && errData.error) {
               setError(errData.error);
             }
           }
         } catch (catError) {
           console.error(`Failed to analyze ${cat}:`, catError);
+        } finally {
+          completed++;
+          const progress = 20 + (completed / CATEGORIES_TO_ANALYZE.length) * 70;
+          setScanProgress(progress);
+          setAnalyzingCategories((prev) => {
+            const next = new Set(prev);
+            next.delete(cat);
+            return next;
+          });
         }
+      };
 
-        setAnalyzingCategories((prev) => {
-          const next = new Set(prev);
-          next.delete(cat);
-          return next;
-        });
+      for (let i = 0; i < CATEGORIES_TO_ANALYZE.length; i += BATCH_SIZE) {
+        const batch = CATEGORIES_TO_ANALYZE.slice(i, i + BATCH_SIZE);
+        const labels = batch.map((cat) => CATEGORY_META[cat].label).join(", ");
+        setScanMessage(`Analyzing ${labels}...`);
+        setScanPhase("scoring");
+        await Promise.all(batch.map(analyzeOne));
       }
 
       // Step 3: Build final report
@@ -327,7 +323,7 @@ export default function Home() {
                     className="mt-4 w-full rounded-xl bg-accent hover:bg-accent-dim text-white font-medium py-3 px-4 transition-colors animate-fade-up"
                     style={{ animationDelay: "0.1s" }}
                   >
-                    Generate Outputs
+                    Generate Standards & Plans
                   </button>
                 )}
               </div>

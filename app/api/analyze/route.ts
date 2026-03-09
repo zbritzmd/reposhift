@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { analyzeCategory } from "@/lib/analyzer";
+import { analyzeCategory, hasApiKey } from "@/lib/analyzer";
 import { AuditCategory, RepoFile, RepoTreeEntry, StackInfo } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!process.env.ANTHROPIC_API_KEY) {
+    if (!hasApiKey()) {
       return NextResponse.json(
         { error: "ANTHROPIC_API_KEY not configured. Add it to .env.local" },
         { status: 500 }
