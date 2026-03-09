@@ -16,6 +16,37 @@ import {
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || "" });
 
 // ----------------------------------------------------------
+// Robust JSON extraction — handles markdown fences, preamble
+// ----------------------------------------------------------
+
+function extractJSON(text: string): string {
+  // Try raw text first
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{")) return trimmed;
+
+  // Strip markdown code fences: ```json ... ``` or ``` ... ```
+  const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch) return fenceMatch[1].trim();
+
+  // Find first { to last }
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start !== -1 && end !== -1 && end > start) {
+    return trimmed.slice(start, end + 1);
+  }
+
+  return trimmed;
+}
+
+function safeParseJSON(text: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(extractJSON(text));
+  } catch {
+    return null;
+  }
+}
+
+// ----------------------------------------------------------
 // Prompt Builders
 // ----------------------------------------------------------
 
@@ -231,10 +262,11 @@ export async function analyzeCategory(
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
 
-    // Parse JSON response
-    const parsed = JSON.parse(text);
+    // Parse JSON response (handles markdown fences, preamble)
+    const parsed = safeParseJSON(text);
+    if (!parsed) throw new Error("Failed to parse AI response as JSON");
 
-    const findings: Finding[] = (parsed.findings || []).map(
+    const findings: Finding[] = (parsed.findings as Record<string, unknown>[] || []).map(
       (f: Record<string, unknown>, i: number) => ({
         id: f.id || `${category}-${i + 1}`,
         category,
@@ -428,22 +460,24 @@ ${fileContext}`,
   const text =
     response.content[0].type === "text" ? response.content[0].text : "{}";
 
-  try {
-    return JSON.parse(text);
-  } catch {
-    const fallback: AIInfraOutput = {
-      agentsMd: "# AGENTS.md\n\nGeneration failed — please retry.",
-    };
-    if (selectedTools.includes("claude"))
-      fallback.claudeMd = "# CLAUDE.md\n\nGeneration failed — please retry.";
-    if (selectedTools.includes("cursor"))
-      fallback.cursorRules = "# .cursorrules\n\nGeneration failed — please retry.";
-    if (selectedTools.includes("copilot"))
-      fallback.copilotInstructions = "# copilot-instructions.md\n\nGeneration failed — please retry.";
-    if (selectedTools.includes("windsurf"))
-      fallback.windsurfRules = "# .windsurfrules\n\nGeneration failed — please retry.";
-    return fallback;
+  const parsed = safeParseJSON(text);
+  if (parsed) {
+    return parsed as unknown as AIInfraOutput;
   }
+
+  // Fallback
+  const fallback: AIInfraOutput = {
+    agentsMd: "# AGENTS.md\n\nGeneration failed — please retry.",
+  };
+  if (selectedTools.includes("claude"))
+    fallback.claudeMd = "# CLAUDE.md\n\nGeneration failed — please retry.";
+  if (selectedTools.includes("cursor"))
+    fallback.cursorRules = "# .cursorrules\n\nGeneration failed — please retry.";
+  if (selectedTools.includes("copilot"))
+    fallback.copilotInstructions = "# copilot-instructions.md\n\nGeneration failed — please retry.";
+  if (selectedTools.includes("windsurf"))
+    fallback.windsurfRules = "# .windsurfrules\n\nGeneration failed — please retry.";
+  return fallback;
 }
 
 // ----------------------------------------------------------
