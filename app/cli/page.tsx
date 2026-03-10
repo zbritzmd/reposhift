@@ -32,10 +32,13 @@ const FLAGS = [
   ["--token=<pat>", "Personal Access Token for private repos"],
   ["--api-key=<key>", "Anthropic API key (alternative to env var)"],
   ["--json", "Output raw JSON instead of formatted report"],
+  ["--verbose", "Show full finding descriptions and suggestions in report"],
   ["--categories=<list>", "Comma-separated categories to analyze (default: all 7)"],
+  ["--remediation", "Generate only the REMEDIATION-PLAN.md (1 API call, fast)"],
+  ["--generate", "Generate full AI documentation kit (ai/ directory + tool wrappers)"],
+  ["--tools=<list>", "AI tools: claude, cursor, copilot, windsurf, codex, gemini"],
+  ["--mode=<mode>", "Generation mode: full (default), missing (skip existing), update (improve existing)"],
   ["--out=<dir>", "Output directory for generated files"],
-  ["--generate=<list>", "Generate: standards, ai-infra, mcp, remediation, or all"],
-  ["--tools=<list>", "AI tools for ai-infra: claude, cursor, copilot, windsurf, codex, gemini"],
 ];
 
 export default function CliPage() {
@@ -59,7 +62,7 @@ export default function CliPage() {
             <div className="space-y-3">
               <CliSnippet label="From inside a git repo" command="npx reposhift audit" />
               <CliSnippet label="Specify a repo" command="npx reposhift audit --repo=owner/repo" />
-              <CliSnippet label="Audit + generate everything" command="npx reposhift audit --generate=all" />
+              <CliSnippet label="Detailed output" command="npx reposhift audit --verbose" />
             </div>
           </div>
 
@@ -67,10 +70,10 @@ export default function CliPage() {
           <div className="rounded-xl border border-border bg-surface-raised p-6 animate-fade-up" style={{ animationDelay: "0.05s" }}>
             <h3 className="text-sm font-semibold text-text-primary mb-4">Generation Options</h3>
             <div className="space-y-3">
-              <CliSnippet label="Standards only" command="npx reposhift audit --generate=standards" />
-              <CliSnippet label="AI configs for specific tools" command="npx reposhift audit --generate=ai-infra --tools=claude,cursor" />
-              <CliSnippet label="Output to a directory" command="npx reposhift audit --generate=all --out=./audit" />
-              <CliSnippet label="JSON output" command="npx reposhift audit --json" />
+              <CliSnippet label="Remediation plan only" command="npx reposhift audit --remediation" />
+              <CliSnippet label="Full documentation kit" command="npx reposhift audit --generate" />
+              <CliSnippet label="Specific tools" command="npx reposhift audit --generate --tools=claude,cursor" />
+              <CliSnippet label="Output to a directory" command="npx reposhift audit --generate --out=./docs" />
             </div>
           </div>
 
