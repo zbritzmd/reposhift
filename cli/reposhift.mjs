@@ -20,6 +20,16 @@ let ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const AZURE_DEVOPS_TOKEN = process.env.AZURE_DEVOPS_TOKEN;
 
+// Fallback: read from .env.local if env var is empty (e.g. Claude Code overrides it)
+if (!ANTHROPIC_API_KEY) {
+  try {
+    const envPath = resolve(process.cwd(), ".env.local");
+    const content = readFileSync(envPath, "utf-8");
+    const match = content.match(/^ANTHROPIC_API_KEY=(.+)$/m);
+    if (match?.[1]?.trim()) ANTHROPIC_API_KEY = match[1].trim();
+  } catch {}
+}
+
 // ── Auto-detect repo URL from local git ──
 function detectRepoUrl() {
   try {
@@ -417,11 +427,9 @@ function scoreColor(score) {
   return c.red;
 }
 
-function printReport(repoName, stack, results) {
+function printReport(repoName, stack, results, verboseMode = false) {
   console.log();
-  console.log(`${c.bold}${c.cyan}╔══════════════════════════════════════════════════╗${c.reset}`);
-  console.log(`${c.bold}${c.cyan}║${c.reset}  ${c.bold}RepoShift${c.reset} — Audit Report                       ${c.bold}${c.cyan}║${c.reset}`);
-  console.log(`${c.bold}${c.cyan}╚══════════════════════════════════════════════════╝${c.reset}`);
+  console.log(`  ${c.dim}│${c.blue}>${c.reset} ${c.bold}Repo${c.blue}Shift${c.reset} — Audit Report`);
   console.log();
   console.log(`  ${c.dim}Repository:${c.reset}  ${repoName}`);
   console.log(`  ${c.dim}Stack:${c.reset}       ${stack.framework} / ${stack.language}`);
@@ -448,7 +456,7 @@ function printReport(repoName, stack, results) {
   console.log(`${c.bold}  └─────────────────────────────────┴───────┘${c.reset}`);
   console.log();
 
-  // Findings
+  // Findings summary
   const allFindings = results.flatMap((r) => r.findings.map((f) => ({ ...f, category: r.category })));
   const criticals = allFindings.filter((f) => f.severity === "critical");
   const warnings = allFindings.filter((f) => f.severity === "warning");
@@ -457,17 +465,43 @@ function printReport(repoName, stack, results) {
   console.log(`  ${c.bold}Findings:${c.reset} ${c.red}${criticals.length} critical${c.reset}  ${c.yellow}${warnings.length} warnings${c.reset}  ${c.blue}${infos.length} info${c.reset}`);
   console.log();
 
-  // List findings grouped by severity
-  for (const [label, group] of [["Critical", criticals], ["Warnings", warnings], ["Info", infos]]) {
-    if (group.length === 0) continue;
-    console.log(`  ${c.bold}${label}:${c.reset}`);
-    for (const f of group) {
-      console.log(`    ${severityIcon(f.severity)} ${c.bold}${f.title}${c.reset}`);
-      console.log(`      ${c.dim}${f.description}${c.reset}`);
-      if (f.file) console.log(`      ${c.cyan}${f.file}${c.reset}`);
-      if (f.suggestion) console.log(`      ${c.green}💡 ${f.suggestion}${c.reset}`);
-      console.log();
+  // Grouped by category (compact by default, verbose for full details)
+  for (const r of results) {
+    if (r.findings.length === 0) continue;
+    const catLabel = CATEGORY_LABELS[r.category] || r.category;
+    const sc = scoreColor(r.score);
+    const crits = r.findings.filter((f) => f.severity === "critical").length;
+    const warns = r.findings.filter((f) => f.severity === "warning").length;
+    const infs = r.findings.filter((f) => f.severity === "info").length;
+    const counts = [
+      crits ? `${c.red}${crits} critical${c.reset}` : "",
+      warns ? `${c.yellow}${warns} warning${c.reset}` : "",
+      infs ? `${c.blue}${infs} info${c.reset}` : "",
+    ].filter(Boolean).join("  ");
+
+    console.log(`  ${sc}■${c.reset} ${c.bold}${catLabel}${c.reset} ${c.dim}(${r.score}/100)${c.reset}  ${counts}`);
+    console.log(`    ${c.dim}${r.summary}${c.reset}`);
+
+    if (verboseMode) {
+      for (const f of r.findings) {
+        console.log(`      ${severityIcon(f.severity)} ${c.bold}${f.title}${c.reset}`);
+        console.log(`        ${c.dim}${f.description}${c.reset}`);
+        if (f.file) console.log(`        ${c.cyan}${f.file}${c.reset}`);
+        if (f.suggestion) console.log(`        ${c.green}💡 ${f.suggestion}${c.reset}`);
+      }
+    } else {
+      // Compact: show just critical + warning titles
+      const important = r.findings.filter((f) => f.severity !== "info");
+      for (const f of important) {
+        console.log(`      ${severityIcon(f.severity)} ${f.title}${f.file ? `  ${c.dim}${f.file}${c.reset}` : ""}`);
+      }
     }
+    console.log();
+  }
+
+  if (!verboseMode && allFindings.length > 0) {
+    console.log(`  ${c.dim}Run with --verbose to see full descriptions and suggestions${c.reset}`);
+    console.log();
   }
 }
 
@@ -907,7 +941,7 @@ async function main() {
 
   if (!command || flags.help) {
     console.log(`
-${c.bold}RepoShift${c.reset} — Audit. Standardize. Shift Forward.
+  ${c.dim}│${c.blue}>${c.reset} ${c.bold}Repo${c.blue}Shift${c.reset}  ${c.dim}— Audit. Standardize. Shift Forward.${c.reset}
 
 ${c.bold}Usage:${c.reset}
   reposhift audit                               Audit current git repo (auto-detects URL)
@@ -915,6 +949,7 @@ ${c.bold}Usage:${c.reset}
   reposhift audit --repo=<url> --token=<pat>    Audit a private repository
   reposhift audit --repo=<url> --json           Output as JSON
   reposhift audit --repo=<url> --categories=structure,patterns
+  reposhift audit --remediation                  Audit + generate remediation plan only
   reposhift audit --generate                    Audit + generate documentation kit
   reposhift audit --generate --tools=claude,codex
   reposhift audit --generate --mode=update       Update existing AI docs
@@ -934,6 +969,8 @@ ${c.bold}Options:${c.reset}
   --generate            Generate AI documentation kit (ai/ directory + tool wrappers)
   --tools=<list>        AI tools: claude, cursor, copilot, windsurf, codex, gemini (auto-detected or all)
   --mode=<mode>         Generation mode: full (default), missing (skip existing), update (improve existing)
+  --verbose             Show full finding descriptions and suggestions in report
+  --remediation         Generate only the REMEDIATION-PLAN.md (1 API call, fast)
   --out=<dir>           Output directory for generated files (default: current directory)
   --help                Show this help message
 
@@ -1005,8 +1042,8 @@ ${c.bold}Categories:${c.reset}
 
   if (!asJson) {
     console.log();
-    console.log(`${c.bold}${c.cyan}⌘ RepoShift${c.reset} — Scanning ${repoDisplayName}...`);
-    if (parsed.provider === "azure-devops") console.log(`  ${c.dim}Provider:${c.reset} Azure DevOps`);
+    console.log(`  ${c.dim}│${c.blue}>${c.reset} ${c.bold}Repo${c.blue}Shift${c.reset} — Scanning ${repoDisplayName}...`);
+    if (parsed.provider === "azure-devops") console.log(`        ${c.dim}Provider:${c.reset} Azure DevOps`);
     console.log();
   }
 
@@ -1077,10 +1114,56 @@ ${c.bold}Categories:${c.reset}
       categories: results,
     }, null, 2));
   } else {
-    printReport(repoDisplayName, stack, results);
+    printReport(repoDisplayName, stack, results, flags.verbose === true);
   }
 
-  // Step 7: Generate Documentation Kit (if --generate flag is set)
+  // Step 7a: Generate Remediation Plan only (if --remediation flag is set)
+  if (flags.remediation) {
+    const outDir = flags.out || ".";
+
+    // Build findings detail for the prompt
+    const findingsDetail = results.map((r) =>
+      `## ${r.category} (Score: ${r.score}/100)\n${r.summary}\n${(r.findings || []).map((f) =>
+        `- [${f.severity}] ${f.title}: ${f.description}${f.file ? ` (${f.file})` : ""}${f.suggestion ? `\n  Suggestion: ${f.suggestion}` : ""}`
+      ).join("\n")}`
+    ).join("\n\n");
+
+    const smallFileContext = fileContext.length > 20000 ? fileContext.slice(0, 20000) : fileContext;
+
+    // Check for existing remediation plan
+    let existingContent;
+    try {
+      const existingPath = resolve(outDir, "REMEDIATION-PLAN.md");
+      if (existsSync(existingPath)) {
+        existingContent = readFileSync(existingPath, "utf-8");
+      }
+    } catch {}
+
+    if (!asJson) {
+      console.log();
+      process.stdout.write(`  ${c.dim}Generating remediation plan...${c.reset}`);
+    }
+
+    try {
+      const content = await generateRemediationCli(stack, treeSummary, smallFileContext, findingsDetail, existingContent);
+      const filePath = resolve(outDir, "REMEDIATION-PLAN.md");
+      writeGeneratedFile(filePath, content);
+      if (!asJson) {
+        console.log(` ${c.green}✓${c.reset}`);
+        console.log();
+        console.log(`  ${c.green}${c.bold}Done!${c.reset} Written to ${c.cyan}${filePath}${c.reset}`);
+        console.log();
+      }
+    } catch (err) {
+      if (!asJson) {
+        console.log(` ${c.red}✗ ${err.message}${c.reset}`);
+      } else {
+        console.error(JSON.stringify({ error: err.message }));
+      }
+    }
+  }
+
+  // Step 7b: Generate Documentation Kit (if --generate flag is set)
   if (flags.generate) {
     const outDir = flags.out || ".";
 
