@@ -9,6 +9,29 @@ export const metadata: Metadata = {
   icons: {
     icon: "/logo.svg",
   },
+  openGraph: {
+    title: "RepoShift — Audit. Standardize. Shift Forward.",
+    description:
+      "AI-powered codebase audit and standardization. Get senior architect-level intelligence for any repository.",
+    url: "https://reposhift.dev",
+    siteName: "RepoShift",
+    images: [
+      {
+        url: "https://reposhift.dev/og.png",
+        width: 1200,
+        height: 630,
+        alt: "RepoShift — AI-powered codebase audit",
+      },
+    ],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "RepoShift — Audit. Standardize. Shift Forward.",
+    description:
+      "AI-powered codebase audit and standardization. Get senior architect-level intelligence for any repository.",
+    images: ["https://reposhift.dev/og.png"],
+  },
 };
 
 export default function RootLayout({
