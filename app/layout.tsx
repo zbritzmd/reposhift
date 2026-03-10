@@ -60,7 +60,7 @@ export default function RootLayout({
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
               <p>&copy; {new Date().getFullYear()} RepoShift. Audit. Standardize. Shift Forward.</p>
               <div className="flex items-center gap-4">
-                <a href="https://github.com/zbritzmd/reposhift" target="_blank" rel="noopener noreferrer" className="hover:text-text-primary transition-colors">GitHub</a>
+                <a href="https://github.com/reposhift/reposhift" target="_blank" rel="noopener noreferrer" className="hover:text-text-primary transition-colors">GitHub</a>
                 <a href="/cli" className="hover:text-text-primary transition-colors">CLI</a>
               </div>
             </div>
