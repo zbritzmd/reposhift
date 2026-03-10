@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 function CliSnippet({ label, command }: { label: string; command: string }) {
   const [copied, setCopied] = useState(false);
@@ -42,6 +42,15 @@ const FLAGS = [
 ];
 
 export default function CliPage() {
+  const [npmVersion, setNpmVersion] = useState("0.1.2");
+
+  useEffect(() => {
+    fetch("https://registry.npmjs.org/reposhift/latest")
+      .then((r) => r.json())
+      .then((d) => { if (d.version) setNpmVersion(d.version); })
+      .catch(() => {});
+  }, []);
+
   return (
     <main className="w-full mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-20">
       <section className="pt-16 sm:pt-20 pb-12">
@@ -66,7 +75,7 @@ export default function CliPage() {
               <path d="M48 48h160v160h-32V80h-48v128H48z" fill="#fff"/>
             </svg>
             reposhift on npm
-            <span className="text-text-muted">v0.1.2</span>
+            <span className="text-text-muted">v{npmVersion}</span>
           </a>
         </div>
 
