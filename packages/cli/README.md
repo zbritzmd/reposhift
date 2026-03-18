@@ -26,8 +26,8 @@ reposhift audit
 # Audit a specific repo
 reposhift audit --repo=owner/repo
 
-# Audit a private repo
-reposhift audit --repo=owner/repo --token=<PAT>
+# Audit a private repo (auto-authenticates via GitHub)
+reposhift audit --repo=owner/private-repo
 ```
 
 ## Features
@@ -37,6 +37,25 @@ reposhift audit --repo=owner/repo --token=<PAT>
 - **Documentation kit** — Full `ai/` directory with patterns, agents, architecture, guides + tool wrappers
 - **Multi-provider** — GitHub and Azure DevOps repos
 - **Zero dependencies** — Single file, native Node.js only
+- **Auto GitHub auth** — Uses `gh` CLI, cached tokens, or device flow (no PAT needed)
+
+## Authentication
+
+GitHub repos authenticate automatically — no manual token setup needed:
+
+1. **`gh` CLI** — If you have GitHub CLI installed and logged in, it just works
+2. **Cached token** — After first login, token is saved to `~/.reposhift/github-token`
+3. **Device flow** — Opens browser for one-click GitHub authorization
+
+```bash
+# Pre-authenticate (optional — happens automatically when needed)
+reposhift login
+
+# Remove saved token
+reposhift logout
+```
+
+Azure DevOps requires `--token=<PAT>` or `AZURE_DEVOPS_TOKEN` env var.
 
 ## Usage
 
@@ -44,9 +63,6 @@ reposhift audit --repo=owner/repo --token=<PAT>
 
 ```bash
 # Basic audit
-reposhift audit --repo=owner/repo
-
-# Compact output (default) — category summaries with critical/warning titles
 reposhift audit --repo=owner/repo
 
 # Verbose output — full descriptions, suggestions, file paths
@@ -103,7 +119,7 @@ your-project/
 | Flag | Description |
 |------|-------------|
 | `--repo=<url>` | Repository URL (auto-detected from git remote if omitted) |
-| `--token=<pat>` | Personal Access Token for private repos |
+| `--token=<pat>` | Access token override (Azure DevOps PAT or GitHub PAT) |
 | `--api-key=<key>` | Anthropic API key (alternative to env var) |
 | `--json` | Output raw JSON instead of formatted report |
 | `--verbose` | Show full finding descriptions and suggestions |
@@ -115,12 +131,19 @@ your-project/
 | `--out=<dir>` | Output directory for generated files |
 | `--help` | Show help message |
 
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `reposhift audit` | Audit a repository |
+| `reposhift login` | Authenticate with GitHub (for private repos) |
+| `reposhift logout` | Remove saved GitHub token |
+
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Your Anthropic API key |
-| `GITHUB_TOKEN` | No | Default GitHub PAT for private repos |
 | `AZURE_DEVOPS_TOKEN` | No | Default Azure DevOps PAT for private repos |
 
 ## Supported Providers
