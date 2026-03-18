@@ -12,13 +12,136 @@
  *   npx reposhift audit --generate=all --api-key=sk-ant-xxx
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { resolve, dirname } from "path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
+import { resolve, dirname, join } from "path";
 import { execSync } from "child_process";
+import { homedir } from "os";
 
 let ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const AZURE_DEVOPS_TOKEN = process.env.AZURE_DEVOPS_TOKEN;
+
+// ── GitHub OAuth Device Flow (Client ID is public — same as gh CLI pattern) ──
+const GITHUB_CLIENT_ID = "Ov23liHEPjbvd1Uw7XLH";
+const REPOSHIFT_DIR = join(homedir(), ".reposhift");
+const TOKEN_PATH = join(REPOSHIFT_DIR, "github-token");
+
+// ── GitHub Token Resolution ──
+// Priority: 1) gh auth token  2) cached ~/.reposhift/github-token  3) device flow
+async function resolveGitHubToken(silent = false) {
+  // 1. Try gh CLI token
+  try {
+    const ghToken = execSync("gh auth token", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+    if (ghToken) {
+      if (!silent) console.log(`  ${c.green}✓${c.reset} Using GitHub token from ${c.dim}gh CLI${c.reset}`);
+      return ghToken;
+    }
+  } catch {}
+
+  // 2. Try cached token
+  try {
+    if (existsSync(TOKEN_PATH)) {
+      const cached = readFileSync(TOKEN_PATH, "utf-8").trim();
+      if (cached) {
+        if (!silent) console.log(`  ${c.green}✓${c.reset} Using saved GitHub token`);
+        return cached;
+      }
+    }
+  } catch {}
+
+  // 3. Device flow
+  return await githubDeviceFlow(silent);
+}
+
+async function githubDeviceFlow(silent = false) {
+  if (!GITHUB_CLIENT_ID || GITHUB_CLIENT_ID.includes("xxxxxx")) {
+    throw new Error("GitHub OAuth not configured. Use --token=<PAT> for private repos.");
+  }
+
+  // Request device code
+  const codeRes = await fetch("https://github.com/login/device/code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ client_id: GITHUB_CLIENT_ID, scope: "repo read:user" }),
+  });
+  const codeData = await codeRes.json();
+
+  if (codeData.error) {
+    throw new Error(`GitHub device flow error: ${codeData.error_description || codeData.error}`);
+  }
+
+  const { device_code, user_code, verification_uri, interval, expires_in } = codeData;
+
+  if (!silent) {
+    console.log();
+    console.log(`  ${c.dim}│${c.blue}>${c.reset} ${c.bold}GitHub authentication required${c.reset}`);
+    console.log(`  ${c.dim}│${c.reset}  Go to: ${c.cyan}${c.bold}${verification_uri}${c.reset}`);
+    console.log(`  ${c.dim}│${c.reset}  Enter code: ${c.yellow}${c.bold}${user_code}${c.reset}`);
+    console.log();
+    process.stdout.write(`  ${c.dim}Waiting for authorization...${c.reset}`);
+  }
+
+  // Poll for token
+  const pollInterval = (interval || 5) * 1000;
+  const deadline = Date.now() + (expires_in || 900) * 1000;
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollInterval));
+
+    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        client_id: GITHUB_CLIENT_ID,
+        device_code,
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      }),
+    });
+    const tokenData = await tokenRes.json();
+
+    if (tokenData.access_token) {
+      // Save token
+      if (!existsSync(REPOSHIFT_DIR)) mkdirSync(REPOSHIFT_DIR, { recursive: true });
+      writeFileSync(TOKEN_PATH, tokenData.access_token, { mode: 0o600 });
+
+      // Get username
+      let username = "";
+      try {
+        const userRes = await fetch("https://api.github.com/user", {
+          headers: { Authorization: `Bearer ${tokenData.access_token}`, "User-Agent": "RepoShift-CLI" },
+        });
+        const user = await userRes.json();
+        username = user.login || "";
+      } catch {}
+
+      if (!silent) {
+        console.log(` ${c.green}✓${c.reset}`);
+        console.log(`  ${c.green}✓${c.reset} Authenticated as ${c.bold}@${username}${c.reset}`);
+        console.log(`  ${c.dim}Token saved to ${TOKEN_PATH}${c.reset}`);
+        console.log();
+      }
+      return tokenData.access_token;
+    }
+
+    if (tokenData.error === "authorization_pending") continue;
+    if (tokenData.error === "slow_down") {
+      await new Promise((r) => setTimeout(r, 5000));
+      continue;
+    }
+    if (tokenData.error === "expired_token") {
+      if (!silent) console.log(` ${c.red}✗ expired${c.reset}`);
+      throw new Error("Device code expired. Please try again.");
+    }
+    if (tokenData.error === "access_denied") {
+      if (!silent) console.log(` ${c.red}✗ denied${c.reset}`);
+      throw new Error("Authorization denied by user.");
+    }
+    if (tokenData.error) {
+      throw new Error(`GitHub OAuth error: ${tokenData.error_description || tokenData.error}`);
+    }
+  }
+
+  throw new Error("Device flow timed out. Please try again.");
+}
 
 // Fallback: read from .env.local if env var is empty (e.g. Claude Code overrides it)
 if (!ANTHROPIC_API_KEY) {
@@ -943,10 +1066,13 @@ async function main() {
     console.log(`
   ${c.dim}│${c.blue}>${c.reset} ${c.bold}Repo${c.blue}Shift${c.reset}  ${c.dim}— Audit. Standardize. Shift Forward.${c.reset}
 
-${c.bold}Usage:${c.reset}
+${c.bold}Commands:${c.reset}
   reposhift audit                               Audit current git repo (auto-detects URL)
   reposhift audit --repo=<url>                  Audit a specific repository
-  reposhift audit --repo=<url> --token=<pat>    Audit a private repository
+  reposhift login                               Authenticate with GitHub (for private repos)
+  reposhift logout                              Remove saved GitHub token
+
+${c.bold}Usage:${c.reset}
   reposhift audit --repo=<url> --json           Output as JSON
   reposhift audit --repo=<url> --categories=structure,patterns
   reposhift audit --remediation                  Audit + generate remediation plan only
@@ -955,14 +1081,14 @@ ${c.bold}Usage:${c.reset}
   reposhift audit --generate --mode=update       Update existing AI docs
 
 ${c.bold}Examples:${c.reset}
-  reposhift audit --repo=https://github.com/owner/repo
+  reposhift audit                                          Scan current repo
+  reposhift audit --repo=owner/repo                        Scan a public repo
+  reposhift audit --repo=owner/private-repo                Scan private repo (auto-authenticates)
   reposhift audit --repo=https://dev.azure.com/org/project/_git/repo --token=<PAT>
-  reposhift audit --repo=owner/repo --generate=all
-  reposhift audit --api-key=sk-ant-xxx --repo=https://github.com/owner/repo
 
 ${c.bold}Options:${c.reset}
   --repo=<url>          Repository URL — GitHub or Azure DevOps (auto-detected from git remote if omitted)
-  --token=<pat>         Personal Access Token for private repos (GitHub PAT or Azure DevOps PAT)
+  --token=<pat>         Access token override (Azure DevOps PAT or GitHub PAT)
   --api-key=<key>       Anthropic API key (alternative to ANTHROPIC_API_KEY env var)
   --json                Output raw JSON instead of formatted report
   --categories=<list>   Comma-separated categories to analyze (default: all)
@@ -974,9 +1100,15 @@ ${c.bold}Options:${c.reset}
   --out=<dir>           Output directory for generated files (default: current directory)
   --help                Show this help message
 
+${c.bold}Authentication:${c.reset}
+  GitHub repos authenticate automatically:
+    1. Uses ${c.dim}gh auth token${c.reset} if GitHub CLI is installed
+    2. Uses cached token from ${c.dim}~/.reposhift/github-token${c.reset}
+    3. Prompts device flow login (opens browser) if needed
+  Azure DevOps requires --token=<PAT> or AZURE_DEVOPS_TOKEN env var.
+
 ${c.bold}Environment:${c.reset}
   ANTHROPIC_API_KEY     Required. Your Anthropic API key.
-  GITHUB_TOKEN          Optional. Default GitHub token for private repos.
   AZURE_DEVOPS_TOKEN    Optional. Default Azure DevOps PAT for private repos.
 
 ${c.bold}Supported Providers:${c.reset}
@@ -992,8 +1124,37 @@ ${c.bold}Categories:${c.reset}
     process.exit(0);
   }
 
+  // ── Login command ──
+  if (command === "login") {
+    console.log();
+    console.log(`  ${c.dim}│${c.blue}>${c.reset} ${c.bold}Repo${c.blue}Shift${c.reset} — GitHub Login`);
+    console.log();
+    try {
+      await resolveGitHubToken(false);
+    } catch (err) {
+      console.error(`  ${c.red}${err.message}${c.reset}`);
+      process.exit(1);
+    }
+    process.exit(0);
+  }
+
+  // ── Logout command ──
+  if (command === "logout") {
+    try {
+      if (existsSync(TOKEN_PATH)) {
+        unlinkSync(TOKEN_PATH);
+        console.log(`  ${c.green}✓${c.reset} Removed saved GitHub token`);
+      } else {
+        console.log(`  ${c.dim}No saved token found${c.reset}`);
+      }
+    } catch (err) {
+      console.error(`  ${c.red}Failed to remove token: ${err.message}${c.reset}`);
+    }
+    process.exit(0);
+  }
+
   if (command !== "audit") {
-    console.error(`${c.red}Unknown command: ${command}. Use 'reposhift audit --repo=<url>'${c.reset}`);
+    console.error(`${c.red}Unknown command: ${command}. Use 'reposhift audit', 'reposhift login', or 'reposhift logout'${c.reset}`);
     process.exit(1);
   }
 
@@ -1025,7 +1186,7 @@ ${c.bold}Categories:${c.reset}
   }
 
   // Determine token based on provider
-  const token = flags.token || (parsed.provider === "azure-devops" ? AZURE_DEVOPS_TOKEN : GITHUB_TOKEN);
+  let token = flags.token || (parsed.provider === "azure-devops" ? AZURE_DEVOPS_TOKEN : null);
 
   if (!ANTHROPIC_API_KEY) {
     console.error(`${c.red}ANTHROPIC_API_KEY not set. Export it or pass --api-key=sk-ant-...${c.reset}`);
@@ -1047,11 +1208,30 @@ ${c.bold}Categories:${c.reset}
     console.log();
   }
 
-  // Step 1: Fetch tree
+  // Step 1: Fetch tree (try public first for GitHub, then auth if needed)
   if (!asJson) process.stdout.write(`  ${c.dim}Fetching repository tree...${c.reset}`);
   let tree;
   if (parsed.provider === "github") {
-    tree = await fetchRepoTree(parsed.owner, parsed.repo, token);
+    try {
+      tree = await fetchRepoTree(parsed.owner, parsed.repo, token);
+    } catch (err) {
+      // If 401/403/404, try authenticating
+      if (!token && (err.message.includes("403") || err.message.includes("404") || err.message.includes("401"))) {
+        if (!asJson) {
+          console.log(` ${c.yellow}→ private repo${c.reset}`);
+        }
+        try {
+          token = await resolveGitHubToken(asJson);
+        } catch (authErr) {
+          console.error(`\n  ${c.red}${authErr.message}${c.reset}`);
+          process.exit(1);
+        }
+        if (!asJson) process.stdout.write(`  ${c.dim}Fetching repository tree...${c.reset}`);
+        tree = await fetchRepoTree(parsed.owner, parsed.repo, token);
+      } else {
+        throw err;
+      }
+    }
   } else {
     tree = await fetchAzDoTree(parsed.org, parsed.project, parsed.repo, token);
   }
